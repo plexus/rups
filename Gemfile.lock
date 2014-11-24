@@ -1,8 +1,3 @@
-PATH
-  remote: vendor/sexpistol
-  specs:
-    sexpistol (0.0.7)
-
 GEM
   remote: https://rubygems.org/
   specs:
@@ -14,6 +9,7 @@ GEM
     concord (0.1.5)
       adamantium (~> 0.2.0)
       equalizer (~> 0.0.9)
+    edn (1.0.6)
     equalizer (0.0.9)
     ice_nine (0.11.0)
     memoizable (0.4.2)
@@ -37,7 +33,7 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
+  edn
   parser
   polyglot
-  sexpistol!
   unparser
