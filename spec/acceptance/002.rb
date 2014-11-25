@@ -1,0 +1,3 @@
+->(foo) {
+  puts foo
+}.(:foo)

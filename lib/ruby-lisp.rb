@@ -1,7 +1,3 @@
-require 'polyglot'
-require 'sexpistol'
-require 'parser'
-require 'unparser'
 
 
 module RubyLisp
@@ -89,7 +85,3 @@ module RubyLisp
     end
   end
 end
-
-Polyglot.register("rl", RubyLisp::Loader)
-
-require 'foo'
