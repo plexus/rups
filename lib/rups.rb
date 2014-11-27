@@ -62,6 +62,34 @@ module Rups
     include Concord::Public.new(:callable)
   end
 
+  class Backquote
+    include Concord::Public.new(:sexp)
+
+    def expand(env, sexp = sexp)
+      if env.primitive?(sexp) || Rups::Symbol === sexp
+        sexp
+      elsif Tilde === sexp
+        env.eval sexp.sexp
+      else
+        sexp.reduce(sexp.class[]) do |coll, s|
+          if TildeSplice === s
+            coll.concat(env.eval s.sexp)
+          else
+            coll << expand(env, s)
+          end
+        end
+      end
+    end
+  end
+
+  class Tilde
+    include Concord::Public.new(:sexp)
+  end
+
+  class TildeSplice
+    include Concord::Public.new(:sexp)
+  end
+
   class Context
     attr_reader :env
     private :env
@@ -130,9 +158,13 @@ module Rups
 
     def quote(sexp) sexp end
 
+    def primitive?(sexp)
+      [Numeric, ::Symbol, String].any? {|t| t === sexp }
+    end
+
     def eval(sexp)
       case sexp
-      when Numeric,::Symbol, String
+      when method(:primitive?).to_proc
         sexp
       when Rups::Symbol
         if sexp.to_s =~ /\A[A-Z]/ && Kernel.const_defined?(fn.symbol)
@@ -140,6 +172,8 @@ module Rups
         else
           lookup(sexp)
         end
+      when Backquote
+        sexp.expand(self)
       when List
         fn   = sexp[0]
         args = sexp.drop(1)
@@ -214,6 +248,9 @@ module Rups
 
 end
 
+EDN.register_reader(?', -> { @s.advance; Rups::List[Rups::Symbol.new(:quote), read_basic] })
+EDN.register_reader(?`, -> { @s.advance; Rups::Backquote.new(read_basic) })
+EDN.register_reader(?~, -> { @s.advance; @s.current == ?@ ? (@s.advance && Rups::TildeSplice.new(read_basic)) : Rups::Tilde.new(read_basic) })
 Polyglot.register("rp", Rups::Loader)
 
 BOOTSTRAP = <<EOF

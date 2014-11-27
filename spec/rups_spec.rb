@@ -30,7 +30,10 @@ describe do
        (def y x)
        y)
      (def y 7)
-     [(local-def 9) y]' => [9, 7]
+     [(local-def 9) y]' => [9, 7],
+    "(apply + '(4 5 6))" => 15,
+    "`(1 2 (+ 3 4) ~(+ 3 4))" => Rups::List[1,2, Rups::List[Rups::Symbol.new(:+), 3, 4], 7],
+    "`[:foo :bar [0 ~@(list 1 2 3) 4]]" => [:foo, :bar, [0, 1, 2, 3, 4]]
 
   }.each do |rups, result|
     specify(rups) {
