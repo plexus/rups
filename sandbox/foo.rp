@@ -1,0 +1,11 @@
+(def tuple_struct (Struct. :x :y))
+(def mk_tuple (lambda [x y] (.new tuple_struct x y)))
+
+(def tup (mk_tuple 5 9))
+
+(import tup)
+
+(p (x))
+(p (y))
+
+(p (list 1 2 3))

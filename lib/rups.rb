@@ -3,6 +3,7 @@ require 'pathname'
 require 'polyglot'
 require 'edn'
 require 'unparser'
+require 'concord'
 
 require 'rups/transform'
 
@@ -17,15 +18,36 @@ module Rups
     Context.new.eval(sexp)
   end
 
-  class Lambda < Struct.new(:arg_names, :body, :bindings)
+  class Lambda
+    include Concord.new(:arg_names, :body, :bindings)
+
     def call(*args)
-      ctx = Context.new(bindings.merge(arg_names.zip(args).to_h))
+      ctx = Context.new(bindings)
+      arg_names.each_with_index do |name, idx|
+        if name.to_sym == :&
+          ctx.def arg_names[idx+1], args[idx..-1]
+          break
+        else
+          ctx.def name, args[idx]
+        end
+      end
       body.map(&ctx.method(:eval)).last
+    end
+
+    def inspect
+      "(lambda [#{arg_names.join(' ')}] #{body.inspect})"
     end
 
     def to_proc
       method(:call).to_proc
     end
+  end
+
+  class Macro < Lambda
+  end
+
+  class Block
+    include Concord::Public.new(:callable)
   end
 
   class Context
@@ -41,16 +63,57 @@ module Rups
       end
     end
 
-    def import(object)
-      env.merge! object.public_methods.map{|name| [name, object.method(name)] }.to_h
+    def lookup(sym, &block)
+      env.fetch(sym.to_sym) { block.call if block_given? }
     end
+
+    def import(object)
+      object.public_methods.each do |name|
+        self.def name, object.method(name)
+      end
+    end
+
+    # def ns(name, *body)
+    #   m = Module.new { extend self }
+    #   defn = ->(name, *args) { m.module_eval { define_method(name.symbol, &lamda(*args)) } }
+    #   ctx = Context.new(env.merge(:defn => defn, name => m, ns: name))
+    #   env[name] = m
+    # end
 
     define_method :def do |name, val|
-      env[name.symbol] = val
+      @env = env.merge(name.to_sym => val)
     end
 
-    define_method :lambda do |arg_names, *body|
-      Lambda.new(arg_names.map(&:symbol), body, env.dup)
+    define_method :"." do |receiver, message, *args|
+      receiver = eval(receiver)
+      args = args.map(&method(:eval))
+
+      block = args.last.is_a?(Block) ? args.pop.callable : nil
+      receiver.public_send(message.to_sym, *args, &block)
+    end
+
+    define_method :do do |*args|
+      if args.length == 1
+        Block.new(eval(args[0]))
+      else
+        Block.new(lambda(*args))
+      end
+    end
+
+    def lambda(arg_names, *body)
+      Lambda.new(arg_names, body, env)
+    end
+
+    def defmacro(name, arg_names, *body)
+      self.def name, Macro.new(arg_names, body, env)
+    end
+
+    def list(*args)
+      EDN::Type::List.new(*args)
+    end
+
+    def begin(*args)
+      args.last
     end
 
     def quote(sexp) sexp end
@@ -63,7 +126,7 @@ module Rups
         if sexp.to_s =~ /\A[A-Z]/ && Kernel.const_defined?(fn.symbol)
           Kernel.const_get(sexp.symbol)
         else
-          env[sexp.symbol]
+          lookup(sexp)
         end
       when EDN::Type::List
         fn   = sexp[0]
@@ -71,64 +134,83 @@ module Rups
 
         case fn
 
-        # don't do anything
-        when EDN::Type::Symbol.new(:quote)
-        when EDN::Type::Symbol.new(:lambda)
+        when EDN::Type::Symbol
+          case fn.to_sym
 
-        # auto-quote the name
-        when EDN::Type::Symbol.new(:def)
-          args = [args[0]] + args.drop(1).map(&method(:eval))
+          # Pass on unevaluated forms
+          when :quote, :lambda, :defmacro, :".", :do
+            return public_send(fn.to_sym, *args)
+
+          when :fn
+            return lambda(*args)
+
+          when /^\.(.+)/
+            return self.public_send(".", args[0], EDN::Type::Symbol.new($1.to_sym), *args.drop(1))
+
+          # auto-quote the name
+          when :def
+            fn = lookup(fn) { raise "Undefined identifier in function position: #{fn}" }
+            args[0] = EDN::Type::List.new(EDN::Type::Symbol.new(:quote), args[0])
+
+          else
+            fn = lookup(fn) { raise "Undefined identifier in function position: #{fn}" }
+          end
 
         # sexp in function position
         when EDN::Type::List
           fn = eval(fn)
-          args = args.map(&method(:eval))
-
-        # evaluate the arguments
-        else
-          args = args.map(&method(:eval))
         end
 
         apply(fn, args)
+      when Array
+        sexp.map(&method(:eval))
       end
     end
 
     def apply(fn, args)
       case fn
-      when EDN::Type::Symbol
-        case fn.to_s
-        when '.'
-          args[0].public_send(*(args.drop(1)))
-        when /\A\./
-          args[0].public_send(fn.to_s[1..-1], *(args.drop(1)))
-        when ->(fn) { fn =~ /\A[A-Z].*\.\z/ && Kernel.const_defined?(fn[0..-2]) }
-          Kernel.const_get(fn.to_s[0..-2]).new(*args)
-        else
-          env.fetch(fn.symbol) { raise "Undefined identifier in function position: #{fn}" }
-            .call(*args)
-        end
-      when Lambda
-        fn.call(*args)
+      when Macro
+        sexp = fn.call(*args)
+        eval(sexp)
       else
-        raise "Bad function: #{fn.inspect}"
+        args = args.map(&method(:eval))
+        fn.call(*args)
       end
     end
   end
 
-  # def self.transform(code)
-  #   Transform.call(code)
-  # end
-
   module Loader
     def self.load(filename, options = nil, &block)
-      ctx = Rups::Context.new
-      EDN::Reader.new(open(filename)).each do |form|
-        ctx.eval(form)
-        #eval(Unparser.unparse(Rups.transform(form)))
+      io = filename.respond_to?(:read) ? filename : open(filename)
+      eval(io)
+    end
+
+    def self.eval(io, ctx = nil)
+      if ctx == nil
+        ctx = Rups::Context.new
+        eval(StringIO.new(BOOTSTRAP), ctx)
       end
+      result = nil
+      EDN::Reader.new(io).each do |form|
+        result = ctx.eval(form)
+      end
+      result
     end
   end
 
 end
 
 Polyglot.register("rp", Rups::Loader)
+
+BOOTSTRAP = <<EOF
+
+(defmacro defn [name args body]
+ (list (quote def) name (list (quote lambda) args body)))
+
+(defn reduce [f val coll]
+  (.reduce coll val (do f)))
+
+(defn + [& args]
+  (reduce (fn [x y] (.+ x y)) 0 args))
+
+EOF

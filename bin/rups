@@ -1,0 +1,16 @@
+#!/usr/bin/env ruby
+
+require 'pathname'
+require 'stringio'
+
+$LOAD_PATH.unshift Pathname(__FILE__).dirname.join('../lib')
+
+require 'rups'
+
+if ARGV.empty?
+  Rups::Loader.eval($stdin)
+elsif ARGV[0] == '-e'
+  Ruby::Loader.eval(StringIO.new(ARGV[1]))
+else
+  Rups::Loader.load(ARGV[0])
+end
