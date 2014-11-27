@@ -10,6 +10,20 @@ require 'rups/transform'
 module Rups
   Root = Pathname(__FILE__).dirname.parent
 
+  Symbol = EDN::Type::Symbol
+  class Symbol
+    def inspect
+      to_sym.to_s
+    end
+  end
+
+  List = EDN::Type::List
+  class List
+    def inspect
+      "(#{map(&:inspect).join(' ')})"
+    end
+  end
+
   def self.read(string)
     EDN.read(string)
   end
@@ -59,8 +73,8 @@ module Rups
       if env.empty?
         import Rups
         import Kernel
-        import self
       end
+      import self
     end
 
     def lookup(sym, &block)
@@ -109,7 +123,7 @@ module Rups
     end
 
     def list(*args)
-      EDN::Type::List.new(*args)
+      List.new(*args)
     end
 
     def begin(*args)
@@ -120,21 +134,21 @@ module Rups
 
     def eval(sexp)
       case sexp
-      when Numeric, Symbol, String
+      when Numeric,::Symbol, String
         sexp
-      when EDN::Type::Symbol
+      when Rups::Symbol
         if sexp.to_s =~ /\A[A-Z]/ && Kernel.const_defined?(fn.symbol)
           Kernel.const_get(sexp.symbol)
         else
           lookup(sexp)
         end
-      when EDN::Type::List
+      when List
         fn   = sexp[0]
         args = sexp.drop(1)
 
         case fn
 
-        when EDN::Type::Symbol
+        when Rups::Symbol
           case fn.to_sym
 
           # Pass on unevaluated forms
@@ -145,19 +159,19 @@ module Rups
             return lambda(*args)
 
           when /^\.(.+)/
-            return self.public_send(".", args[0], EDN::Type::Symbol.new($1.to_sym), *args.drop(1))
+            return self.public_send(".", args[0], Rups::Symbol.new($1.to_sym), *args.drop(1))
 
           # auto-quote the name
           when :def
             fn = lookup(fn) { raise "Undefined identifier in function position: #{fn}" }
-            args[0] = EDN::Type::List.new(EDN::Type::Symbol.new(:quote), args[0])
+            args[0] = List.new(Rups::Symbol.new(:quote), args[0])
 
           else
             fn = lookup(fn) { raise "Undefined identifier in function position: #{fn}" }
           end
 
         # sexp in function position
-        when EDN::Type::List
+        when List
           fn = eval(fn)
         end
 
@@ -167,7 +181,9 @@ module Rups
       end
     end
 
-    def apply(fn, args)
+    def apply(fn, *args)
+      list = args.pop
+      args = List[*args, *list]
       case fn
       when Macro
         sexp = fn.call(*args)
@@ -204,13 +220,18 @@ Polyglot.register("rp", Rups::Loader)
 
 BOOTSTRAP = <<EOF
 
-(defmacro defn [name args body]
- (list (quote def) name (list (quote lambda) args body)))
+(defmacro defn [name args & body]
+  (list (quote def) name (.concat (list (quote lambda) args) body)))
 
 (defn reduce [f val coll]
   (.reduce coll val (do f)))
 
 (defn + [& args]
   (reduce (fn [x y] (.+ x y)) 0 args))
+
+(defmacro str [& args]
+  (list (quote .join) args))
+
+
 
 EOF

@@ -10,7 +10,10 @@ describe do
      [x, y]' => [:foo, 11],
     '(apply (fn [x y z] (.* (.+ x y) z)) (list 1 2 3))' => 9,
     '(begin (.+ 2 2) (.+ 3 3))' => 6,
-    '(defmacro two-times [x] [x x]) (two-times 3)' => [3, 3],
+    '(def x 0)
+     (defmacro two-times [x]
+       (list (quote begin) x x))
+     (two-times (def x (.+ x 1))) x' => 2,
     '(defmacro defn [name args body]
        (list (quote def) name (list (quote fn) args body)))
      (defn add [x y]
@@ -20,7 +23,14 @@ describe do
     '(. 3 next)' => 4,
     '(. [1 2 3] map (do [x] (.* x x)))' => [1, 4, 9],
     '(.map [1 2 3] (do [x] (.* x x)))' => [1, 4, 9],
-    '(+ 1 2 3)' => 6
+    '(+ 1 2 3)' => 6,
+    '(str "foo" 7 :bar " " "x")' => "foo7bar x",
+    '(apply list 1 2 3 (quote (4 5 6)))' => Rups::List[1,2,3,4,5,6],
+    '(defn local-def [x]
+       (def y x)
+       y)
+     (def y 7)
+     [(local-def 9) y]' => [9, 7]
 
   }.each do |rups, result|
     specify(rups) {
