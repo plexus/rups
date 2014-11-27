@@ -5,8 +5,6 @@ require 'edn'
 require 'unparser'
 require 'concord'
 
-require 'rups/transform'
-
 module Rups
   Root = Pathname(__FILE__).dirname.parent
 
